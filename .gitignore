@@ -8,6 +8,8 @@
 [Mm]emoryCaptures/
 [Rr]ecordings/
 UserSettings/
+.utmp/
+UpgradeLog.htm
 
 # Auto-generated project files
 *.csproj
@@ -31,6 +33,9 @@ UserSettings/
 
 # VS Code
 .vscode/
+
+# Visual Studio
+.vs/
 
 # OS files
 .DS_Store
