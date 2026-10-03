@@ -450,6 +450,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::TEMARPlacementController
   raycastManager: {fileID: 652055405}
   arCamera: {fileID: 747838438}
+  loadCsvModel: 1
+  csvFileName: test3.csv
+  interpolationSteps: 4
+  stationWidth: 0.04
+  sectionDepth: 0.12
+  verticalScale: 0.0015
+  minResistivity: 1
+  maxResistivity: 1000
   stationCount: 8
   stationSpacing: 0.045
   sectionWidth: 0.12
