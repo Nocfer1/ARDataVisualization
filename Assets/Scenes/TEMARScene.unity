@@ -428,7 +428,7 @@ GameObject:
   - component: {fileID: 652055409}
   - component: {fileID: 652055406}
   - component: {fileID: 652055405}
-  - component: {fileID: 652055404}
+  - component: {fileID: 652055410}
   m_Layer: 0
   m_Name: XR Origin (AR)
   m_TagString: Untagged
@@ -436,36 +436,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &652055404
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 652055403}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 53f027bfc4abb164690f414ad4cb09ed, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TEMARPlacementController
-  raycastManager: {fileID: 652055405}
-  arCamera: {fileID: 747838438}
-  stationCount: 8
-  stationSpacing: 0.045
-  sectionWidth: 0.12
-  layerThicknesses:
-  - 0.025
-  - 0.035
-  - 0.05
-  - 0.07
-  resistivities:
-  - 25
-  - 80
-  - 220
-  - 600
-  minResistivity: 10
-  maxResistivity: 1000
-  modelScale: 1
 --- !u!114 &652055405
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -546,6 +516,21 @@ MonoBehaviour:
   m_EditorClassIdentifier: Unity.XR.Interaction.Toolkit::UnityEngine.XR.Interaction.Toolkit.Inputs.InputActionManager
   m_ActionAssets:
   - {fileID: -944628639613478452, guid: c348712bda248c246b8c49b3db54643f, type: 3}
+--- !u!114 &652055410
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 652055403}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 569df4cf72597de4783ccdc82c9113b3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TEMSpawnManager
+  objectSpawner: {fileID: 1925107483}
+  interactionManager: {fileID: 0}
+  screenInteractor: {fileID: 1114146438}
 --- !u!1 &715927052
 GameObject:
   m_ObjectHideFlags: 0
@@ -1013,7 +998,8 @@ MonoBehaviour:
   m_SelectExited:
     m_PersistentCalls:
       m_Calls: []
-  m_StartingHoverFilters: []
+  m_StartingHoverFilters:
+  - {fileID: 1114146441}
   m_StartingSelectFilters: []
   m_SelectInput:
     m_InputSourceMode: 3
@@ -1750,7 +1736,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Unity.XR.Interaction.Toolkit.Samples.StarterAssets::UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets.ObjectSpawner
   m_CameraToFace: {fileID: 0}
-  m_ObjectPrefabs: []
+  m_ObjectPrefabs:
+  - {fileID: 1542099203060551184, guid: f23d4043d5c4e8546bbe612052da177e, type: 3}
   m_SpawnVisualizationPrefab: {fileID: 0}
   m_SpawnOptionIndex: 0
   m_OnlySpawnInView: 1
