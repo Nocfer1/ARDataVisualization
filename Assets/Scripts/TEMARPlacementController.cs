@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.Networking;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
@@ -13,17 +15,22 @@ public class TEMARPlacementController : MonoBehaviour
     [SerializeField] private Camera arCamera;
     [Header("Model data")]
     [SerializeField] private bool loadCsvModel = true;
-    [SerializeField] private string csvFileName = "test3.csv";
-    [SerializeField] private int interpolationSteps = 4;
-    [SerializeField] private float stationWidth = 0.04f;
+    [SerializeField] private string csvFileName = "anothertest.csv";
+    [SerializeField] private bool previewImmediatelyInEditor = true;
+    [SerializeField] private float editorPreviewDistance = 0.65f;
+    [SerializeField] private bool useDirectTouchManipulation = true;
+    [SerializeField] private bool activateAtCurrentTransform;
+    [SerializeField] private int interpolationSteps = 0;
+    [SerializeField] private float stationWidth = 0.07f;
     [SerializeField] private float sectionDepth = 0.12f;
     [SerializeField] private float verticalScale = 0.0015f;
     [SerializeField] private float minResistivity = 1f;
     [SerializeField] private float maxResistivity = 1000f;
+    [SerializeField] private bool placeAboveGround = true;
 
     [Header("Synthetic fallback model (used when Load Csv Model is off)")]
     [SerializeField] private int stationCount = 8;
-    [SerializeField] private float stationSpacing = 0.045f;
+    [SerializeField] private float stationSpacing = 0.14f;
     [SerializeField] private float sectionWidth = 0.12f;
     [SerializeField] private float[] layerThicknesses = { 0.025f, 0.035f, 0.05f, 0.07f };
     [SerializeField] private float[] resistivities = { 25f, 80f, 220f, 600f };
@@ -33,70 +40,130 @@ public class TEMARPlacementController : MonoBehaviour
     private Transform modelRoot;
     private bool placed;
     private bool scanStarted;
-    private string status = "Add the model CSV to Assets/StreamingAssets, then start scanning.";
+    private string status = "Loading model and starting AR scan...";
     private bool dragging;
     private bool modelReady;
+    private Texture2D resistivityLegendTexture;
+    private Coroutine csvLoadRoutine;
+#if UNITY_EDITOR
+    private bool editorMoveDragging;
+    private bool editorRotateDragging;
+#endif
 
     private void Awake()
     {
         if (arCamera == null) arCamera = Camera.main;
+#if UNITY_EDITOR
+        // Keep the temporary editor preview aligned with the current comparison dataset,
+        // even if Unity still has an older serialized scene instance loaded.
+        if (previewImmediatelyInEditor)
+        {
+            csvFileName = "anothertest.csv";
+            minResistivity = 1f;
+            maxResistivity = 1000f;
+        }
+#endif
+        scanStarted = true;
+        resistivityLegendTexture = CreateResistivityLegendTexture();
         modelRoot = new GameObject("TEM model").transform;
         modelRoot.SetParent(transform, false);
         modelRoot.gameObject.SetActive(false);
         if (loadCsvModel)
-            StartCoroutine(LoadCsvModel());
+            csvLoadRoutine = StartCoroutine(LoadCsvModel());
         else
-        {
             CreateDemoModel();
-            FinishModelLoad("Synthetic demo model ready. Tap a detected surface to place it.");
-        }
     }
 
     private void Update()
     {
         if (!scanStarted) return;
 
-        if (Input.touchCount == 1)
+        if (useDirectTouchManipulation)
+            HandleTouchInput();
+
+#if UNITY_EDITOR
+        HandleEditorMouseInput();
+#endif
+    }
+
+#if UNITY_EDITOR
+    private void HandleEditorMouseInput()
+    {
+        Mouse mouse = Mouse.current;
+        if (mouse == null || !previewImmediatelyInEditor || !placed || arCamera == null) return;
+
+        if (mouse.leftButton.wasPressedThisFrame) editorMoveDragging = true;
+        if (mouse.leftButton.wasReleasedThisFrame) editorMoveDragging = false;
+        if (mouse.rightButton.wasPressedThisFrame) editorRotateDragging = true;
+        if (mouse.rightButton.wasReleasedThisFrame) editorRotateDragging = false;
+
+        Vector2 delta = mouse.delta.ReadValue();
+        if (editorMoveDragging && mouse.leftButton.isPressed)
         {
-            Touch touch = Input.GetTouch(0);
-            if (touch.phase == TouchPhase.Began)
+            float worldHeight = arCamera.orthographic
+                ? arCamera.orthographicSize * 2f
+                : 2f * editorPreviewDistance * Mathf.Tan(arCamera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            float unitsPerPixel = worldHeight / Mathf.Max(1, Screen.height);
+            modelRoot.position += (arCamera.transform.right * delta.x + arCamera.transform.up * delta.y) * unitsPerPixel;
+        }
+
+        if (editorRotateDragging && mouse.rightButton.isPressed)
+            modelRoot.Rotate(arCamera.transform.up, delta.x * 0.5f, Space.World);
+    }
+#endif
+
+    private void HandleTouchInput()
+    {
+        Touchscreen touchscreen = Touchscreen.current;
+        if (touchscreen == null) return;
+
+        TouchControl firstTouch = null;
+        TouchControl secondTouch = null;
+        foreach (TouchControl touch in touchscreen.touches)
+        {
+            if (!touch.press.isPressed) continue;
+            if (firstTouch == null) firstTouch = touch;
+            else
             {
-                if (!placed && modelReady)
-                {
-                    TryPlace(touch.position);
-                    return;
-                }
-                dragging = true;
-            }
-            else if (touch.phase == TouchPhase.Moved && placed && dragging)
-            {
-                MoveOnDetectedPlane(touch.position);
-            }
-            else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
-            {
-                dragging = false;
+                secondTouch = touch;
+                break;
             }
         }
-        else if (Input.touchCount >= 2 && placed)
-        {
-            Touch a = Input.GetTouch(0);
-            Touch b = Input.GetTouch(1);
-            Vector2 deltaA = a.position - a.deltaPosition;
-            Vector2 deltaB = b.position - b.deltaPosition;
-            float oldDistance = Vector2.Distance(deltaA, deltaB);
-            float newDistance = Vector2.Distance(a.position, b.position);
-            float oldAngle = Mathf.Atan2(deltaB.y - deltaA.y, deltaB.x - deltaA.x) * Mathf.Rad2Deg;
-            float newAngle = Mathf.Atan2(b.position.y - a.position.y, b.position.x - a.position.x) * Mathf.Rad2Deg;
 
+        if (firstTouch == null)
+        {
+            dragging = false;
+            return;
+        }
+
+        Vector2 firstPosition = firstTouch.position.ReadValue();
+        if (secondTouch != null && placed)
+        {
+            Vector2 secondPosition = secondTouch.position.ReadValue();
+            Vector2 previousFirst = firstPosition - firstTouch.delta.ReadValue();
+            Vector2 previousSecond = secondPosition - secondTouch.delta.ReadValue();
+            float oldDistance = Vector2.Distance(previousFirst, previousSecond);
+            float newDistance = Vector2.Distance(firstPosition, secondPosition);
+            float oldAngle = Mathf.Atan2(previousSecond.y - previousFirst.y, previousSecond.x - previousFirst.x) * Mathf.Rad2Deg;
+            float newAngle = Mathf.Atan2(secondPosition.y - firstPosition.y, secondPosition.x - firstPosition.x) * Mathf.Rad2Deg;
             if (oldDistance > 1f)
                 modelRoot.localScale = Vector3.one * Mathf.Clamp(modelRoot.localScale.x * newDistance / oldDistance, 0.05f, 3f);
             modelRoot.Rotate(Vector3.up, Mathf.DeltaAngle(oldAngle, newAngle), Space.World);
             dragging = false;
+            return;
         }
 
-#if UNITY_EDITOR
-        if (Input.GetMouseButtonDown(0) && !placed) TryPlace(Input.mousePosition);
-#endif
+        if (firstTouch.press.wasPressedThisFrame)
+        {
+            if (!placed && modelReady)
+                TryPlace(firstPosition);
+            else if (placed)
+                dragging = true;
+            return;
+        }
+
+        if (placed && dragging && firstTouch.delta.ReadValue().sqrMagnitude > 0f)
+            MoveOnDetectedPlane(firstPosition);
     }
 
     private void TryPlace(Vector2 screenPosition)
@@ -128,33 +195,117 @@ public class TEMARPlacementController : MonoBehaviour
             modelRoot.position = Hits[0].pose.position;
     }
 
-    private void CreateDemoModel()
+    public void CreateDemoModel()
     {
-        float totalDepth = 0f;
-        foreach (float thickness in layerThicknesses) totalDepth += thickness;
-        float startX = -((stationCount - 1) * stationSpacing) * 0.5f;
+        // The mock-data prefab builds during Awake; this makes the spawner callback safe
+        // and prevents it from replacing a CSV model when CSV mode is enabled.
+        if (loadCsvModel || modelReady) return;
 
-        for (int station = 0; station < stationCount; station++)
+        int safeStationCount = Mathf.Max(1, stationCount);
+        int layerCount = Mathf.Min(layerThicknesses.Length, resistivities.Length);
+        if (layerCount == 0)
         {
-            float x = startX + station * stationSpacing;
+            Debug.LogError("Mock model needs at least one layer thickness and resistivity.", this);
+            return;
+        }
+
+        float[,] values = new float[safeStationCount, layerCount];
+        float[] demoThicknesses = new float[layerCount];
+        System.Array.Copy(layerThicknesses, demoThicknesses, layerCount);
+        for (int station = 0; station < safeStationCount; station++)
+        {
             float variation = 0.78f + 0.22f * Mathf.Sin(station * 0.9f);
-            float y = 0f;
-            for (int layer = 0; layer < layerThicknesses.Length; layer++)
+            for (int layer = 0; layer < layerCount; layer++)
+                values[station, layer] = resistivities[layer] * variation;
+        }
+
+        BuildModel(new TEMData
+        {
+            stationCount = safeStationCount,
+            stationSpacing = stationSpacing,
+            sectionWidth = sectionWidth,
+            layerThicknesses = demoThicknesses,
+            resistivities = values
+        });
+
+        modelRoot.gameObject.SetActive(true);
+        placed = true;
+        FinishModelLoad("Synthetic mock model ready.");
+    }
+
+    /// <summary>Builds a station-by-layer model from synthetic or imported TEM data.</summary>
+    public void BuildModel(TEMData data)
+    {
+        if (data.stationCount < 1 || data.stationSpacing <= 0f || data.sectionWidth <= 0f ||
+            data.layerThicknesses == null || data.layerThicknesses.Length == 0 || data.resistivities == null ||
+            data.resistivities.GetLength(0) < data.stationCount ||
+            data.resistivities.GetLength(1) < data.layerThicknesses.Length)
+        {
+            Debug.LogError("TEMData dimensions do not match its station and layer counts.", this);
+            return;
+        }
+
+        if (csvLoadRoutine != null)
+        {
+            StopCoroutine(csvLoadRoutine);
+            csvLoadRoutine = null;
+        }
+
+        for (int i = modelRoot.childCount - 1; i >= 0; i--)
+        {
+            GameObject oldBlock = modelRoot.GetChild(i).gameObject;
+            if (Application.isPlaying) Destroy(oldBlock);
+            else DestroyImmediate(oldBlock);
+        }
+
+        int layerCount = data.layerThicknesses.Length;
+        float totalDepth = 0f;
+        foreach (float thickness in data.layerThicknesses)
+            totalDepth += Mathf.Max(0.001f, thickness);
+        float startX = -((data.stationCount - 1) * data.stationSpacing) * 0.5f;
+
+        for (int station = 0; station < data.stationCount; station++)
+        {
+            float x = startX + station * data.stationSpacing;
+            float depth = 0f;
+            for (int layer = 0; layer < layerCount; layer++)
             {
-                float thickness = layerThicknesses[layer];
-                float rho = resistivities[Mathf.Min(layer, resistivities.Length - 1)] * variation;
+                float thickness = Mathf.Max(0.001f, data.layerThicknesses[layer]);
+                float centerY = placeAboveGround
+                    ? totalDepth - depth - thickness * 0.5f
+                    : -(depth + thickness * 0.5f);
                 GameObject block = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 block.name = $"Station_{station + 1}_Layer_{layer + 1}";
                 block.transform.SetParent(modelRoot, false);
-                block.transform.localPosition = new Vector3(x, -(y + thickness * 0.5f), 0f);
-                block.transform.localScale = new Vector3(stationSpacing * 0.96f, thickness * 0.96f, sectionWidth);
-                Renderer renderer = block.GetComponent<Renderer>();
-                renderer.material.color = ResistivityColor(rho);
+                block.transform.localPosition = new Vector3(x, centerY, 0f);
+                block.transform.localScale = new Vector3(
+                    Mathf.Min(data.stationSpacing * 0.96f, stationWidth),
+                    thickness * 0.96f,
+                    data.sectionWidth);
+                block.GetComponent<Renderer>().material.color = ResistivityColor(data.resistivities[station, layer]);
                 Collider collider = block.GetComponent<Collider>();
                 if (collider != null) Destroy(collider);
-                y += thickness;
+                depth += thickness;
             }
         }
+
+        SetModelCollider(
+            data.stationCount * data.stationSpacing,
+            totalDepth,
+            data.sectionWidth,
+            (placeAboveGround ? 1f : -1f) * totalDepth * 0.5f);
+        modelRoot.gameObject.SetActive(true);
+        placed = true;
+        modelReady = true;
+        status = "TEM model ready.";
+    }
+
+    private void SetModelCollider(float width, float height, float depth, float centerY)
+    {
+        BoxCollider modelCollider = GetComponent<BoxCollider>();
+        if (modelCollider == null) modelCollider = gameObject.AddComponent<BoxCollider>();
+        modelCollider.center = new Vector3(0f, centerY, 0f);
+        modelCollider.size = new Vector3(width, height, depth);
     }
 
     private System.Collections.IEnumerator LoadCsvModel()
@@ -193,13 +344,32 @@ public class TEMARPlacementController : MonoBehaviour
         }
 
         BuildCsvModel(stations);
-        FinishModelLoad($"Loaded {stations.Count} stations from {csvFileName}. Tap a detected surface to place it.");
+        FinishModelLoad($"Loaded {stations.Count} stations from {csvFileName}.");
     }
 
     private void FinishModelLoad(string message)
     {
         modelReady = true;
         status = message;
+        if (activateAtCurrentTransform)
+        {
+            modelRoot.gameObject.SetActive(true);
+            placed = true;
+        }
+#if UNITY_EDITOR
+        if (previewImmediatelyInEditor && arCamera != null)
+        {
+            Transform cameraTransform = arCamera.transform;
+            modelRoot.SetPositionAndRotation(
+                cameraTransform.position + cameraTransform.forward * editorPreviewDistance,
+                cameraTransform.rotation
+            );
+            modelRoot.localScale = Vector3.one * modelScale;
+            modelRoot.gameObject.SetActive(true);
+            placed = true;
+            status = $"Editor preview · {message} · left-drag moves, right-drag rotates.";
+        }
+#endif
     }
 
     private class ModelStation
@@ -258,17 +428,37 @@ public class TEMARPlacementController : MonoBehaviour
     private void BuildCsvModel(List<ModelStation> stations)
     {
         int visualIndex = 0;
+        float lineCenterOffset = (stations.Count - 1) * stationSpacing * 0.5f;
         for (int i = 0; i < stations.Count - 1; i++)
         {
-            DrawCsvStation(stations[i], visualIndex * stationSpacing);
+            DrawCsvStation(stations[i], visualIndex * stationSpacing - lineCenterOffset);
             for (int step = 1; step <= interpolationSteps; step++)
             {
                 float t = step / (float)(interpolationSteps + 1);
-                DrawCsvStation(Interpolate(stations[i], stations[i + 1], t), (visualIndex + t) * stationSpacing);
+                DrawCsvStation(Interpolate(stations[i], stations[i + 1], t), (visualIndex + t) * stationSpacing - lineCenterOffset);
             }
             visualIndex++;
         }
-        DrawCsvStation(stations[stations.Count - 1], visualIndex * stationSpacing);
+        DrawCsvStation(stations[stations.Count - 1], visualIndex * stationSpacing - lineCenterOffset);
+
+        float maximumDepth = 0f;
+        foreach (ModelStation station in stations)
+        {
+            float stationDepth = 0f;
+            foreach (float thickness in station.thicknesses)
+                stationDepth += thickness;
+            if (station.resistivities.Count > station.thicknesses.Count)
+                stationDepth += Mathf.Max(station.doi - stationDepth, 1f);
+            maximumDepth = Mathf.Max(maximumDepth, stationDepth);
+        }
+
+        float columnSpacing = stationSpacing / Mathf.Max(1, interpolationSteps + 1);
+        float renderedWidth = interpolationSteps > 0
+            ? Mathf.Min(stationWidth, columnSpacing * 0.9f)
+            : stationWidth;
+        float width = Mathf.Max(renderedWidth, (stations.Count - 1) * stationSpacing + renderedWidth);
+        float height = maximumDepth * verticalScale;
+        SetModelCollider(width, height, sectionDepth, -height * 0.5f);
     }
 
     private ModelStation Interpolate(ModelStation a, ModelStation b, float t)
@@ -304,7 +494,11 @@ public class TEMARPlacementController : MonoBehaviour
         block.name = objectName;
         block.transform.SetParent(modelRoot, false);
         block.transform.localPosition = new Vector3(x, -(depth + thickness * 0.5f) * verticalScale, 0f);
-        block.transform.localScale = new Vector3(stationWidth, thickness * verticalScale, sectionDepth);
+        float renderedColumnSpacing = stationSpacing / Mathf.Max(1, interpolationSteps + 1);
+        float renderedStationWidth = interpolationSteps > 0
+            ? Mathf.Min(stationWidth, renderedColumnSpacing * 0.9f)
+            : stationWidth;
+        block.transform.localScale = new Vector3(renderedStationWidth, thickness * verticalScale, sectionDepth);
         block.GetComponent<Renderer>().material.color = ResistivityColor(resistivity);
         Collider collider = block.GetComponent<Collider>();
         if (collider != null) Destroy(collider);
@@ -343,33 +537,104 @@ public class TEMARPlacementController : MonoBehaviour
         float min = Mathf.Max(minResistivity, 0.0001f);
         float max = Mathf.Max(maxResistivity, min + 0.0001f);
         float t = Mathf.InverseLerp(Mathf.Log10(min), Mathf.Log10(max), Mathf.Log10(Mathf.Max(value, 0.0001f)));
-        return Color.Lerp(new Color(0.05f, 0.28f, 0.85f), new Color(0.95f, 0.2f, 0.08f), t);
+        return ColorForScale(t);
+    }
+
+    private Color ColorForScale(float t)
+    {
+        return JetPalette.Evaluate(t);
+    }
+
+    private Texture2D CreateResistivityLegendTexture()
+    {
+        Texture2D texture = new Texture2D(256, 1, TextureFormat.RGBA32, false)
+        {
+            name = "Resistivity color scale",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear
+        };
+        for (int x = 0; x < texture.width; x++)
+            texture.SetPixel(x, 0, ColorForScale(x / (float)(texture.width - 1)));
+        texture.Apply();
+        return texture;
+    }
+
+    private void OnDestroy()
+    {
+        if (resistivityLegendTexture != null)
+        {
+            if (Application.isPlaying) Destroy(resistivityLegendTexture);
+            else DestroyImmediate(resistivityLegendTexture);
+        }
     }
 
     private void OnGUI()
     {
-        float scale = Mathf.Max(1f, Screen.width / 390f);
-        GUIStyle label = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * scale), wordWrap = true };
-        GUIStyle button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(16 * scale) };
-        GUI.Box(new Rect(12, 12, Screen.width - 24, 88 * scale), GUIContent.none);
-        GUI.Label(new Rect(24, 20, Screen.width - 48, 42 * scale), status, label);
+        float scale = Mathf.Clamp(Screen.height / 900f, 0.8f, 1.35f);
+        GUIStyle label = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(14 * scale), wordWrap = true };
+        GUIStyle button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(14 * scale) };
+        GUI.Box(new Rect(12 * scale, 12 * scale, Screen.width - 24 * scale, 48 * scale), GUIContent.none);
+        GUI.Label(new Rect(22 * scale, 20 * scale, Screen.width - 44 * scale, 34 * scale), status, label);
 
-        if (!scanStarted)
+        if (resistivityLegendTexture != null)
         {
-            if (GUI.Button(new Rect(24, 54 * scale, Screen.width - 48, 38 * scale), "Start scanning", button))
+            float legendWidth = Mathf.Min(Screen.width * 0.78f, 520f * scale);
+            float legendX = (Screen.width - legendWidth) * 0.5f;
+            float barY = 88f * scale;
+            GUIStyle legendTitle = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
+            GUI.Label(new Rect(legendX, barY - 23f * scale, legendWidth, 18f * scale), "Resistivity (Ω·m)", legendTitle);
+            Rect barRect = new Rect(legendX, barY, legendWidth, 12f * scale);
+            GUI.DrawTexture(barRect, resistivityLegendTexture);
+            GUIStyle tickLabel = new GUIStyle(label)
             {
-                scanStarted = true;
-                if (modelReady) status = "Point at a surface and move the phone slowly.";
-            }
+                fontSize = Mathf.RoundToInt(10 * scale),
+                alignment = TextAnchor.UpperCenter,
+                wordWrap = false
+            };
+            DrawColorScaleTicks(barRect, tickLabel, scale);
         }
-        else if (placed && GUI.Button(new Rect(24, Screen.height - 64 * scale, Screen.width - 48, 48 * scale), "Remove model", button))
+
+        if (placed && GUI.Button(new Rect(Screen.width - 164 * scale, Screen.height - 56 * scale, 148 * scale, 38 * scale), "Remove model", button))
         {
             placed = false;
             status = "Point at a surface and tap to place the model.";
             modelRoot.gameObject.SetActive(false);
         }
+    }
 
-        GUI.Label(new Rect(16, Screen.height - 32 * scale, Screen.width - 32, 28 * scale),
-            loadCsvModel ? "Resistivity (Ω·m) · depth is shown relative to the section" : "SYNTHETIC DEMO · illustrative resistivity and depth", label);
+    private void DrawColorScaleTicks(Rect barRect, GUIStyle labelStyle, float scale)
+    {
+        float min = Mathf.Max(minResistivity, 0.0001f);
+        float max = Mathf.Max(maxResistivity, min + 0.0001f);
+        float logMin = Mathf.Log(min);
+        float logMax = Mathf.Log(max);
+        int firstDecade = Mathf.FloorToInt(Mathf.Log10(min));
+        int lastDecade = Mathf.CeilToInt(Mathf.Log10(max));
+
+        for (int decade = firstDecade; decade <= lastDecade; decade++)
+        {
+            float decadeBase = Mathf.Pow(10f, decade);
+            for (int factor = 1; factor <= 9; factor++)
+            {
+                float value = factor * decadeBase;
+                if (value < min - 0.000001f || value > max + 0.000001f) continue;
+
+                float position = Mathf.Clamp01((Mathf.Log(value) - logMin) / (logMax - logMin));
+                float x = barRect.x + position * barRect.width;
+                bool hasLabel = factor == 1 || factor == 3;
+                float tickHeight = (hasLabel ? 8f : 4f) * scale;
+                GUI.DrawTexture(new Rect(x, barRect.yMax, Mathf.Max(1f, scale), tickHeight), Texture2D.whiteTexture);
+
+                if (hasLabel)
+                {
+                    string text = value >= 1f ? value.ToString("0", CultureInfo.InvariantCulture) : value.ToString("0.0", CultureInfo.InvariantCulture);
+                    float labelWidth = 34f * scale;
+                    // Center each label on its tick; only clamp to the screen, not to the bar,
+                    // so the endpoint labels align with the endpoint ticks instead of shifting inward.
+                    float labelX = Mathf.Clamp(x - labelWidth * 0.5f, 0f, Screen.width - labelWidth);
+                    GUI.Label(new Rect(labelX, barRect.yMax + 9f * scale, labelWidth, 16f * scale), text, labelStyle);
+                }
+            }
+        }
     }
 }
