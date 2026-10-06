@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
@@ -9,8 +12,10 @@ public class TEMSpawnManager : MonoBehaviour
     [SerializeField] private ObjectSpawner objectSpawner;
     [SerializeField] private XRInteractionManager interactionManager;
     [SerializeField] private XRBaseInteractor screenInteractor;
+    [SerializeField] private string csvFileName = "test3.csv";
     
     private GameObject _currentModel;
+    private readonly TEMCsvLoader _TEMCsvLoader = new TEMCsvLoader();
     
     private void OnEnable()
     {
@@ -24,28 +29,42 @@ public class TEMSpawnManager : MonoBehaviour
             objectSpawner.objectSpawned -= OnModelSpawned;
     }
 
-    private void OnModelSpawned(GameObject spawnedObject)
+    private async void OnModelSpawned(GameObject spawnedObject)
     {
+        // 1. EXPLICIT DELETION: Destroy the old model if it exists
+        if (_currentModel != null && _currentModel != spawnedObject)
+        {
+            Destroy(_currentModel);
+        }
         _currentModel = spawnedObject;
 
-        // 1. Build the 3D grid and programmatic BoxCollider
-        if (_currentModel.TryGetComponent<TEMARPlacementController>(out var controller))
+        try
         {
-            controller.CreateDemoModel();
-        }
-        
-        Debug.Log($"InteractionManager is null? {interactionManager == null}");
+            if (_currentModel.TryGetComponent<TEMARPlacementController>(out var controller))
+            {
+                List<TEMStationData> stations = await _TEMCsvLoader.LoadCsvAsync(csvFileName);
+            
+                // Guard against destruction if a new tap occurred during the async load
+                if (this == null || _currentModel == null || _currentModel != spawnedObject) return;
+            
+                controller.BuildModel(stations);
+            }
 
-        if (interactionManager == null)
-        {
-            interactionManager = FindFirstObjectByType<XRInteractionManager>();
-            Debug.Log($"InteractionManager is still null? {interactionManager == null}");
+            if (this == null || _currentModel == null) return;
+
+            if (interactionManager == null)
+            {
+                interactionManager = FindFirstObjectByType<XRInteractionManager>();
+            }
+
+            if (interactionManager != null && screenInteractor != null && _currentModel.TryGetComponent<IXRSelectInteractable>(out var interactable))
+            {
+                interactionManager.SelectEnter(screenInteractor, interactable);
+            }
         }
-        
-        if (interactionManager != null && screenInteractor != null && _currentModel.TryGetComponent<IXRSelectInteractable>(out var interactable))
+        catch (Exception ex)
         {
-            interactionManager.SelectEnter(screenInteractor, interactable);
+            Debug.LogError($"[TEMSpawnManager] Failed to setup spawned model: {ex.Message}", this);
         }
-        
     }
 }
