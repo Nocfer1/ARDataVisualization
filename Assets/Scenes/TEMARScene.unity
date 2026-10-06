@@ -451,15 +451,17 @@ MonoBehaviour:
   raycastManager: {fileID: 652055405}
   arCamera: {fileID: 747838438}
   loadCsvModel: 1
-  csvFileName: test3.csv
-  interpolationSteps: 4
-  stationWidth: 0.04
+  csvFileName: anothertest.csv
+  previewImmediatelyInEditor: 1
+  editorPreviewDistance: 0.65
+  interpolationSteps: 0
+  stationWidth: 0.07
   sectionDepth: 0.12
   verticalScale: 0.0015
   minResistivity: 1
   maxResistivity: 1000
   stationCount: 8
-  stationSpacing: 0.045
+  stationSpacing: 0.14
   sectionWidth: 0.12
   layerThicknesses:
   - 0.025
@@ -471,8 +473,6 @@ MonoBehaviour:
   - 80
   - 220
   - 600
-  minResistivity: 10
-  maxResistivity: 1000
   modelScale: 1
 --- !u!114 &652055405
 MonoBehaviour:
@@ -1667,7 +1667,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1925107481
 Transform:
   m_ObjectHideFlags: 0
