@@ -281,10 +281,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TEMARPlacementController
   baseMaterial: {fileID: 2100000, guid: 86f5a5a30738593448da52ad9f25df1b, type: 2}
-  interpolationSteps: 0
-  stationSpacing: 0.1
-  stationWidth: 0.07
-  sectionDepth: 0.12
-  verticalScale: 0.0015
+  cylinderDiameter: 0.14
+  verticalScale: 0.003
   minResistivity: 1
   maxResistivity: 1000

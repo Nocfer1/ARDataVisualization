@@ -58,22 +58,39 @@ public class TEMCsvLoader
         int resistivityIndex = Array.IndexOf(headers, "Resistivities");
         int thicknessIndex = Array.IndexOf(headers, "Thicknesses");
         int doiIndex = Array.IndexOf(headers, "DOI");
+        int xIndex = Array.IndexOf(headers, "UtmX");
+        int yIndex = Array.IndexOf(headers, "UtmY");
+        int zIndex = Array.IndexOf(headers, "UtmZ");
 
-        if (stationIndex < 0 || resistivityIndex < 0 || thicknessIndex < 0 || doiIndex < 0)
+        if (stationIndex < 0 || resistivityIndex < 0 || thicknessIndex < 0 || doiIndex < 0 ||
+            xIndex < 0 || yIndex < 0 || zIndex < 0)
         {
-            error = "CSV needs StationNumber, Resistivities, Thicknesses, and DOI columns.";
+            error = "CSV requires StationNumber, Resistivities, Thicknesses, DOI, X, Y, and Z columns.";
             return false;
         }
+
+        // Determine the highest column index required to avoid out-of-bounds errors on partial rows
+        int maxRequiredIndex = stationIndex;
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, resistivityIndex);
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, thicknessIndex);
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, doiIndex);
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, xIndex);
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, yIndex);
+        maxRequiredIndex = Mathf.Max(maxRequiredIndex, zIndex);
 
         for (int row = 1; row < lines.Length; row++)
         {
             string[] columns = SplitCsvLine(lines[row]);
-            int required = Mathf.Max(Mathf.Max(stationIndex, resistivityIndex), Mathf.Max(thicknessIndex, doiIndex));
-            if (columns.Length <= required) continue;
+            if (columns.Length <= maxRequiredIndex) continue;
 
             if (!int.TryParse(columns[stationIndex], NumberStyles.Integer, CultureInfo.InvariantCulture, out int number) ||
-                !float.TryParse(columns[doiIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float doi))
+                !float.TryParse(columns[doiIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float doi) ||
+                !float.TryParse(columns[xIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) ||
+                !float.TryParse(columns[yIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float y) ||
+                !float.TryParse(columns[zIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float z))
+            {
                 continue;
+            }
 
             List<float> rho = ParseFloatList(columns[resistivityIndex]);
             List<float> thickness = ParseFloatList(columns[thicknessIndex]);
@@ -84,7 +101,8 @@ public class TEMCsvLoader
                 stationNumber = number,
                 resistivities = rho,
                 thicknesses = thickness,
-                doi = doi
+                doi = doi,
+                worldPosition = new Vector3(x, y, z)
             });
         }
 

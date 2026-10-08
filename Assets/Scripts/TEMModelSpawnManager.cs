@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
@@ -42,12 +41,13 @@ public class TEMSpawnManager : MonoBehaviour
         {
             if (_currentModel.TryGetComponent<TEMARPlacementController>(out var controller))
             {
-                List<TEMStationData> stations = await _TEMCsvLoader.LoadCsvAsync(csvFileName);
+                List<TEMStationData> rawStations = await _TEMCsvLoader.LoadCsvAsync(csvFileName);
             
                 // Guard against destruction if a new tap occurred during the async load
                 if (this == null || _currentModel == null || _currentModel != spawnedObject) return;
-            
-                controller.BuildModel(stations);
+                
+                List<TEMStationData> processedStations = TEMSpatialProcessor.NormalizeStationPositions(rawStations, 0.01f, controller.VerticalScale);
+                controller.BuildModel(processedStations);
             }
 
             if (this == null || _currentModel == null) return;

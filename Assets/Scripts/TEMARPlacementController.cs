@@ -3,72 +3,40 @@ using UnityEngine;
 
 /// <summary>
 /// Passive presentation component that generates 3D TEM model geometry.
-/// Does not perform I/O or automatic initialization on Awake.
+/// Combines all layers of each station into a single GameObject per station using Mesh.CombineMeshes.
 /// </summary>
 public class TEMARPlacementController : MonoBehaviour
 {
-    [SerializeField] private Material baseMaterial; // Assign a URP/Unlit material in the Inspector
+    [SerializeField] private Material baseMaterial;
     
     [Header("Model Geometry Config")]
-    [SerializeField] private int interpolationSteps = 0;
-    [SerializeField] private float stationSpacing = 0.14f;
-    [SerializeField] private float stationWidth = 0.07f;
-    [SerializeField] private float sectionDepth = 0.12f;
+    [SerializeField] private float cylinderDiameter = 0.07f;
     [SerializeField] private float verticalScale = 0.0015f;
     [SerializeField] private float minResistivity = 1f;
     [SerializeField] private float maxResistivity = 1000f;
 
     private MaterialPropertyBlock _propBlock;
-    private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
-    private static readonly int ColorID = Shader.PropertyToID("_Color");
     private Transform _modelRoot;
+    private Mesh _primitiveCylinderMesh;
     private bool _modelReady;
 
     public string status { get; private set; } = "Idle";
     public bool isModelReady => _modelReady;
+    public float VerticalScale => verticalScale;
     
     private void Awake()
     {
         _propBlock = new MaterialPropertyBlock();
+
+        // Cache Unity's built-in primitive cylinder mesh template once
+        GameObject tempCylinder = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        _primitiveCylinderMesh = tempCylinder.GetComponent<MeshFilter>().sharedMesh;
+        Destroy(tempCylinder);
     }
 
     /// <summary>
-    /// Generates a synthetic model using fallback inspector values.
-    /// </summary>
-    public void CreateDemoModel()
-    {
-        var layerThicknesses = new[] { 0.025f, 0.035f, 0.05f, 0.07f };
-        var resistivities = new[] { 25f, 80f, 220f, 600f };
-        
-        int layerCount = Mathf.Min(layerThicknesses.Length, resistivities.Length);
-
-        List<TEMStationData> demoStations = new List<TEMStationData>();
-        for (int station = 0; station < 8; station++)
-        {
-            float variation = 0.78f + 0.22f * Mathf.Sin(station * 0.9f);
-            List<float> stationResistivities = new List<float>();
-            List<float> stationThicknesses = new List<float>();
-
-            for (int layer = 0; layer < layerCount; layer++)
-            {
-                stationResistivities.Add(resistivities[layer] * variation);
-                stationThicknesses.Add(layerThicknesses[layer]);
-            }
-
-            demoStations.Add(new TEMStationData
-            {
-                stationNumber = station + 1,
-                resistivities = stationResistivities,
-                thicknesses = stationThicknesses,
-                doi = 0f
-            });
-        }
-
-        BuildModel(demoStations);
-    }
-    
-    /// <summary>
-    /// Builds 3D block geometry from parsed station data.
+    /// Builds 3D cylindrical station geometry using pre-calculated local positions.
+    /// Creates 1 GameObject per station containing a combined layer mesh.
     /// </summary>
     public void BuildModel(List<TEMStationData> stations)
     {
@@ -83,130 +51,123 @@ public class TEMARPlacementController : MonoBehaviour
         _modelRoot = new GameObject("TEM_Model_Root").transform;
         _modelRoot.SetParent(transform, false);
 
-        int visualIndex = 0;
-        float lineCenterOffset = (stations.Count - 1) * stationSpacing * 0.5f;
+        Bounds modelBounds = new Bounds();
+        bool boundsInitialized = false;
 
-        for (int i = 0; i < stations.Count - 1; i++)
+        // Build 1 GameObject per station
+        foreach (var station in stations)
         {
-            DrawStation(stations[i], visualIndex * stationSpacing - lineCenterOffset);
-            for (int step = 1; step <= interpolationSteps; step++)
+            float totalDepth = CreateStationGameObject(station);
+
+            Vector3 top = station.localPosition;
+            Vector3 bottom = station.localPosition + Vector3.down * (totalDepth * verticalScale);
+
+            if (!boundsInitialized)
             {
-                float t = step / (float)(interpolationSteps + 1);
-                DrawStation(Interpolate(stations[i], stations[i + 1], t), (visualIndex + t) * stationSpacing - lineCenterOffset);
+                modelBounds = new Bounds(top, Vector3.one * cylinderDiameter);
+                modelBounds.Encapsulate(bottom);
+                boundsInitialized = true;
             }
-            visualIndex++;
-        }
-        DrawStation(stations[stations.Count - 1], visualIndex * stationSpacing - lineCenterOffset);
-
-        // Calculate maximum depth for height calculation and offsetting
-        float maximumDepth = 0f;
-        foreach (TEMStationData station in stations)
-        {
-            float stationDepth = 0f;
-            foreach (float thickness in station.thicknesses)
-                stationDepth += thickness;
-
-            if (station.resistivities.Count > station.thicknesses.Count)
-                stationDepth += Mathf.Max(station.doi - stationDepth, 1f);
-
-            maximumDepth = Mathf.Max(maximumDepth, stationDepth);
+            else
+            {
+                modelBounds.Encapsulate(top);
+                modelBounds.Encapsulate(bottom);
+            }
         }
 
-        float columnSpacing = stationSpacing / Mathf.Max(1, interpolationSteps + 1);
-        float renderedWidth = interpolationSteps > 0
-            ? Mathf.Min(stationWidth, columnSpacing * 0.9f)
-            : stationWidth;
+        modelBounds.Expand(new Vector3(cylinderDiameter, 0f, cylinderDiameter));
 
-        float width = Mathf.Max(renderedWidth, (stations.Count - 1) * stationSpacing + renderedWidth);
-        float height = maximumDepth * verticalScale;
+        // Shift root up so lowest geometry point sits flush on top of the AR plane
+        float lowestY = modelBounds.min.y;
+        float heightOffset = -lowestY;
+        _modelRoot.localPosition = new Vector3(0f, heightOffset, 0f);
 
-        // Shift root up so the bottom layer of the model sits on top of the AR plane
-        _modelRoot.localPosition = new Vector3(0f, height, 0f);
+        // Set parent BoxCollider
+        SetModelCollider(
+            modelBounds.size.x, 
+            modelBounds.size.y, 
+            modelBounds.size.z, 
+            modelBounds.center + new Vector3(0f, heightOffset, 0f)
+        );
 
-        // Position collider bounds to match the shifted geometry
-        SetModelCollider(width, height, sectionDepth, height * 0.5f);
-
-        status = "TEM model ready.";
+        status = $"TEM model ready ({stations.Count} stations built).";
         _modelReady = true;
     }
 
-    private TEMStationData Interpolate(TEMStationData a, TEMStationData b, float t)
+    private float CreateStationGameObject(TEMStationData station)
     {
-        TEMStationData result = new TEMStationData
-        {
-            stationNumber = -1,
-            doi = Mathf.Lerp(a.doi, b.doi, t)
-        };
+        GameObject stationGO = new GameObject($"Station_{station.stationNumber}");
+        stationGO.transform.SetParent(_modelRoot, false);
+        stationGO.transform.localPosition = station.localPosition;
 
-        int resCount = Mathf.Min(a.resistivities.Count, b.resistivities.Count);
-        for (int i = 0; i < resCount; i++)
-            result.resistivities.Add(Mathf.Lerp(a.resistivities[i], b.resistivities[i], t));
-
-        int thickCount = Mathf.Min(a.thicknesses.Count, b.thicknesses.Count);
-        for (int i = 0; i < thickCount; i++)
-            result.thicknesses.Add(Mathf.Lerp(a.thicknesses[i], b.thicknesses[i], t));
-
-        return result;
-    }
-
-    private void DrawStation(TEMStationData station, float x)
-    {
+        List<CombineInstance> combineList = new List<CombineInstance>();
         float depth = 0f;
         int layerCount = Mathf.Min(station.thicknesses.Count, station.resistivities.Count);
-        
-       Debug.Log($"Layer count is: {layerCount}"); 
 
         for (int layer = 0; layer < layerCount; layer++)
         {
             float thickness = station.thicknesses[layer];
-            CreateBlock(x, depth, thickness, station.resistivities[layer], $"Station_{station.stationNumber}_Layer_{layer + 1}");
+            Color color = ResistivityColor(station.resistivities[layer]);
+            
+            combineList.Add(CreateLayerCombineInstance(depth, thickness, color));
             depth += thickness;
         }
 
         if (station.resistivities.Count > station.thicknesses.Count)
         {
             float thickness = Mathf.Max(station.doi - depth, 1f);
-            CreateBlock(x, depth, thickness, station.resistivities[^1], $"Station_{station.stationNumber}_HalfSpace");
+            Color color = ResistivityColor(station.resistivities[^1]);
+            
+            combineList.Add(CreateLayerCombineInstance(depth, thickness, color));
+            depth += thickness;
         }
-    }
 
-    private void CreateBlock(float x, float depth, float thickness, float resistivity, string objectName)
-    {
-        GameObject block = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        block.name = objectName;
-        block.transform.SetParent(_modelRoot, false);
-        block.transform.localPosition = new Vector3(x, -(depth + thickness * 0.5f) * verticalScale, 0f);
+        // Bake layers into a single combined mesh for this station
+        Mesh stationMesh = new Mesh { name = $"Station_{station.stationNumber}_Mesh" };
+        stationMesh.CombineMeshes(combineList.ToArray(), true, true);
 
-        float renderedColumnSpacing = stationSpacing / Mathf.Max(1, interpolationSteps + 1);
-        float renderedStationWidth = interpolationSteps > 0
-            ? Mathf.Min(stationWidth, renderedColumnSpacing * 0.9f)
-            : stationWidth;
-
-        block.transform.localScale = new Vector3(renderedStationWidth, thickness * verticalScale, sectionDepth);
-
-        Renderer renderer = block.GetComponent<Renderer>();
-
-        // Overwrite the primitive's default legacy material
-        if (baseMaterial != null)
+        // Clean up temporary instantiated layer meshes to prevent memory leaks
+        foreach (var instance in combineList)
         {
-            renderer.sharedMaterial = baseMaterial;
+            if (instance.mesh != null) Destroy(instance.mesh);
         }
 
-        // Apply color without material instantiation
-        Color color = ResistivityColor(resistivity);
-        renderer.GetPropertyBlock(_propBlock);
+        MeshFilter mf = stationGO.AddComponent<MeshFilter>();
+        MeshRenderer mr = stationGO.AddComponent<MeshRenderer>();
         
-        // Target both properties to ensure compatibility with URP or Unlit shaders
-        _propBlock.SetColor(BaseColorID, color);
-        _propBlock.SetColor(ColorID, color);
-        
-        renderer.SetPropertyBlock(_propBlock);
+        mf.sharedMesh = stationMesh;
+        mr.sharedMaterial = baseMaterial;
 
-        Collider collider = block.GetComponent<Collider>();
-        if (collider != null) Destroy(collider);
+        return depth;
     }
 
-    private void SetModelCollider(float width, float height, float depth, float centerY)
+    private CombineInstance CreateLayerCombineInstance(float depth, float thickness, Color color)
+    {
+        // 1. Clone primitive cylinder mesh and assign vertex colors
+        Mesh layerMesh = Instantiate(_primitiveCylinderMesh);
+        Color[] colors = new Color[layerMesh.vertexCount];
+        for (int i = 0; i < colors.Length; i++)
+        {
+            colors[i] = color;
+        }
+        layerMesh.colors = colors;
+
+        // 2. Compute local transform relative to the station origin
+        float yCenter = -(depth + thickness * 0.5f) * verticalScale;
+        float scaledHeight = (thickness * verticalScale) * 0.5f; // Primitive cylinder height is 2 units
+
+        Vector3 localPos = new Vector3(0f, yCenter, 0f);
+        Vector3 localScale = new Vector3(cylinderDiameter, scaledHeight, cylinderDiameter);
+        Matrix4x4 transformMatrix = Matrix4x4.TRS(localPos, Quaternion.identity, localScale);
+
+        return new CombineInstance
+        {
+            mesh = layerMesh,
+            transform = transformMatrix
+        };
+    }
+
+    private void SetModelCollider(float sizeX, float sizeY, float sizeZ, Vector3 centerOffset)
     {
         BoxCollider modelCollider = GetComponent<BoxCollider>();
         if (modelCollider == null) 
@@ -214,8 +175,8 @@ public class TEMARPlacementController : MonoBehaviour
             modelCollider = gameObject.AddComponent<BoxCollider>();
         }
     
-        modelCollider.center = new Vector3(0f, centerY, 0f);
-        modelCollider.size = new Vector3(width, height, depth);
+        modelCollider.center = centerOffset;
+        modelCollider.size = new Vector3(sizeX, sizeY, sizeZ);
     }
 
     private Color ResistivityColor(float value)

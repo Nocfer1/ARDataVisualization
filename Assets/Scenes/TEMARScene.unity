@@ -531,7 +531,7 @@ MonoBehaviour:
   objectSpawner: {fileID: 1925107483}
   interactionManager: {fileID: 0}
   screenInteractor: {fileID: 1114146438}
-  csvFileName: test3.csv
+  csvFileName: aksdasdka.csv
 --- !u!1 &715927052
 GameObject:
   m_ObjectHideFlags: 0
