@@ -532,6 +532,10 @@ MonoBehaviour:
   interactionManager: {fileID: 0}
   screenInteractor: {fileID: 1114146438}
   csvFileName: aksdasdka.csv
+  horizontalScale: 0.01
+  mapboxToken:
+  utmZone: 32
+  isNorthernHemisphere: 1
 --- !u!1 &715927052
 GameObject:
   m_ObjectHideFlags: 0

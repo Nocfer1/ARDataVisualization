@@ -7,6 +7,9 @@ using UnityEngine;
 /// </summary>
 public class TEMARPlacementController : MonoBehaviour
 {
+    [Header("Map Overlay Config")]
+    [SerializeField] private Material unlitMapMaterial; // Assigned in Inspector (URP/Unlit)
+    [Header("Station Material")]
     [SerializeField] private Material baseMaterial;
     
     [Header("Model Geometry Config")]
@@ -15,10 +18,12 @@ public class TEMARPlacementController : MonoBehaviour
     [SerializeField] private float minResistivity = 1f;
     [SerializeField] private float maxResistivity = 1000f;
 
-    private MaterialPropertyBlock _propBlock;
     private Transform _modelRoot;
     private Mesh _primitiveCylinderMesh;
     private bool _modelReady;
+    private float _modelBaseY;
+    
+    private Texture2D _activeMapTexture; // Tracked to prevent native GPU memory leaks
 
     public string status { get; private set; } = "Idle";
     public bool isModelReady => _modelReady;
@@ -26,8 +31,6 @@ public class TEMARPlacementController : MonoBehaviour
     
     private void Awake()
     {
-        _propBlock = new MaterialPropertyBlock();
-
         // Cache Unity's built-in primitive cylinder mesh template once
         GameObject tempCylinder = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         _primitiveCylinderMesh = tempCylinder.GetComponent<MeshFilter>().sharedMesh;
@@ -48,6 +51,8 @@ public class TEMARPlacementController : MonoBehaviour
         }
 
         if (_modelRoot != null) Destroy(_modelRoot.gameObject);
+        if (_activeMapTexture != null) Destroy(_activeMapTexture);
+
         _modelRoot = new GameObject("TEM_Model_Root").transform;
         _modelRoot.SetParent(transform, false);
 
@@ -79,6 +84,9 @@ public class TEMARPlacementController : MonoBehaviour
 
         // Shift root up so lowest geometry point sits flush on top of the AR plane
         float lowestY = modelBounds.min.y;
+        
+        _modelBaseY = lowestY; // <--- ADD THIS LINE to save the base position
+
         float heightOffset = -lowestY;
         _modelRoot.localPosition = new Vector3(0f, heightOffset, 0f);
 
@@ -177,6 +185,65 @@ public class TEMARPlacementController : MonoBehaviour
     
         modelCollider.center = centerOffset;
         modelCollider.size = new Vector3(sizeX, sizeY, sizeZ);
+    }
+    
+    /// <summary>
+    /// Instantiates and scales a flat satellite map overlay Quad beneath the station geometry.
+    /// </summary>
+    public void AttachMapOverlay(
+        Texture2D mapTexture, 
+        float mapWidthMeters, 
+        float mapHeightMeters, 
+        Vector2 offsetFromCentroid, 
+        float horizontalScale)
+    {
+        if (_modelRoot == null)
+        {
+            Debug.LogError("Cannot attach map overlay: _modelRoot is null. BuildModel first.", this);
+            return;
+        }
+
+        if (mapTexture == null)
+        {
+            Debug.LogError("Cannot attach map overlay: Provided texture is null.", this);
+            return;
+        }
+
+        _activeMapTexture = mapTexture;
+
+        // 1. Instantiate Quad under _modelRoot
+        GameObject mapQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        mapQuad.name = "TEM_Mapbox_Overlay";
+        mapQuad.transform.SetParent(_modelRoot, false);
+
+        // 2. Remove MeshCollider so it doesn't block AR raycasts or touch gestures
+        Collider quadCollider = mapQuad.GetComponent<Collider>();
+        if (quadCollider != null) Destroy(quadCollider);
+
+        // 3. Orient flat on XZ plane
+        mapQuad.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+        // 4. Position at surface baseline (Y = 0) with minor offset to prevent z-fighting
+        mapQuad.transform.localPosition = new Vector3(
+            offsetFromCentroid.x, 
+            _modelBaseY + 0.001f,
+            offsetFromCentroid.y
+        );
+
+        // 5. Scale Quad to match physical UTM meter bounds * horizontalScale
+        mapQuad.transform.localScale = new Vector3(
+            mapWidthMeters * horizontalScale,
+            mapHeightMeters * horizontalScale,
+            1f
+        );
+
+        // 6. Apply material and downloaded texture
+        MeshRenderer renderer = mapQuad.GetComponent<MeshRenderer>();
+        Material instanceMat = new Material(unlitMapMaterial)
+        {
+            mainTexture = _activeMapTexture
+        };
+        renderer.sharedMaterial = instanceMat;
     }
 
     private Color ResistivityColor(float value)

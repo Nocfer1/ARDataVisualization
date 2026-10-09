@@ -280,6 +280,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 53f027bfc4abb164690f414ad4cb09ed, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TEMARPlacementController
+  unlitMapMaterial: {fileID: 2100000, guid: a19ea7b0368a4ae4db726aa8dab84cbc, type: 2}
   baseMaterial: {fileID: 2100000, guid: 86f5a5a30738593448da52ad9f25df1b, type: 2}
   cylinderDiameter: 0.14
   verticalScale: 0.003

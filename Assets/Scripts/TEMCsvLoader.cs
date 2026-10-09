@@ -60,12 +60,11 @@ public class TEMCsvLoader
         int doiIndex = Array.IndexOf(headers, "DOI");
         int xIndex = Array.IndexOf(headers, "UtmX");
         int yIndex = Array.IndexOf(headers, "UtmY");
-        int zIndex = Array.IndexOf(headers, "UtmZ");
 
         if (stationIndex < 0 || resistivityIndex < 0 || thicknessIndex < 0 || doiIndex < 0 ||
-            xIndex < 0 || yIndex < 0 || zIndex < 0)
+            xIndex < 0 || yIndex < 0)
         {
-            error = "CSV requires StationNumber, Resistivities, Thicknesses, DOI, X, Y, and Z columns.";
+            error = "CSV requires StationNumber, Resistivities, Thicknesses, DOI, X, and Y columns.";
             return false;
         }
 
@@ -76,7 +75,6 @@ public class TEMCsvLoader
         maxRequiredIndex = Mathf.Max(maxRequiredIndex, doiIndex);
         maxRequiredIndex = Mathf.Max(maxRequiredIndex, xIndex);
         maxRequiredIndex = Mathf.Max(maxRequiredIndex, yIndex);
-        maxRequiredIndex = Mathf.Max(maxRequiredIndex, zIndex);
 
         for (int row = 1; row < lines.Length; row++)
         {
@@ -86,8 +84,7 @@ public class TEMCsvLoader
             if (!int.TryParse(columns[stationIndex], NumberStyles.Integer, CultureInfo.InvariantCulture, out int number) ||
                 !float.TryParse(columns[doiIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float doi) ||
                 !float.TryParse(columns[xIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) ||
-                !float.TryParse(columns[yIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float y) ||
-                !float.TryParse(columns[zIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float z))
+                !float.TryParse(columns[yIndex], NumberStyles.Float, CultureInfo.InvariantCulture, out float y))
             {
                 continue;
             }
@@ -102,7 +99,7 @@ public class TEMCsvLoader
                 resistivities = rho,
                 thicknesses = thickness,
                 doi = doi,
-                worldPosition = new Vector3(x, y, z)
+                worldPosition = new Vector3(x, y, 0f)
             });
         }
 
