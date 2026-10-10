@@ -13,7 +13,7 @@ public class TEMARPlacementController : MonoBehaviour
     [SerializeField] private Material baseMaterial;
     
     [Header("Model Geometry Config")]
-    [SerializeField] private float cylinderDiameter = 0.07f;
+    [SerializeField] private float cylinderDiameter = 0.02f;
     [SerializeField] private float verticalScale = 0.0015f;
     [SerializeField] private float minResistivity = 1f;
     [SerializeField] private float maxResistivity = 1000f;
@@ -22,13 +22,14 @@ public class TEMARPlacementController : MonoBehaviour
     private Mesh _primitiveCylinderMesh;
     private bool _modelReady;
     private float _modelBaseY;
+    private float _builtCylinderDiameter;
     
     private Texture2D _activeMapTexture; // Tracked to prevent native GPU memory leaks
 
     public string status { get; private set; } = "Idle";
     public bool isModelReady => _modelReady;
     public float VerticalScale => verticalScale;
-    
+
     private void Awake()
     {
         // Cache Unity's built-in primitive cylinder mesh template once
@@ -81,6 +82,7 @@ public class TEMARPlacementController : MonoBehaviour
         }
 
         modelBounds.Expand(new Vector3(cylinderDiameter, 0f, cylinderDiameter));
+        _builtCylinderDiameter = cylinderDiameter;
 
         // Shift root up so lowest geometry point sits flush on top of the AR plane
         float lowestY = modelBounds.min.y;
@@ -101,6 +103,36 @@ public class TEMARPlacementController : MonoBehaviour
         status = $"TEM model ready ({stations.Count} stations built).";
         _modelReady = true;
     }
+
+    /// <summary>Changes station cylinder widths while keeping station positions and the map fixed.</summary>
+    public void SetCylinderDiameter(float diameter)
+    {
+        cylinderDiameter = Mathf.Max(0.001f, diameter);
+        if (!_modelReady || _modelRoot == null || _builtCylinderDiameter <= 0f) return;
+
+        float scale = cylinderDiameter / _builtCylinderDiameter;
+        foreach (Transform station in _modelRoot)
+        {
+            if (!station.name.StartsWith("Station_")) continue;
+            station.localScale = new Vector3(scale, 1f, scale);
+        }
+
+        BoxCollider modelCollider = GetComponent<BoxCollider>();
+        if (modelCollider != null)
+        {
+            Vector3 center = modelCollider.center;
+            center.x *= scale;
+            center.z *= scale;
+            modelCollider.center = center;
+            modelCollider.size = new Vector3(
+                modelCollider.size.x * scale,
+                modelCollider.size.y,
+                modelCollider.size.z * scale);
+        }
+        _builtCylinderDiameter = cylinderDiameter;
+    }
+
+    public float CylinderDiameter => cylinderDiameter;
 
     private float CreateStationGameObject(TEMStationData station)
     {

@@ -5,12 +5,14 @@ using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
+using UnityEngine.UI;
 
 public class TEMSpawnManager : MonoBehaviour
 {
     [SerializeField] private ObjectSpawner objectSpawner;
     [SerializeField] private XRInteractionManager interactionManager;
     [SerializeField] private XRBaseInteractor screenInteractor;
+    [SerializeField] private Slider cylinderDiameterSlider;
     
     [Header("Data Settings")]
     [SerializeField] private string csvFileName = "test3.csv";
@@ -22,6 +24,7 @@ public class TEMSpawnManager : MonoBehaviour
     [SerializeField] private bool isNorthernHemisphere = true;
 
     private GameObject _currentModel;
+    private TEMARPlacementController _boundDiameterController;
     private readonly TEMCsvLoader _TEMCsvLoader = new TEMCsvLoader();
     
     private void OnEnable()
@@ -32,6 +35,8 @@ public class TEMSpawnManager : MonoBehaviour
     private void OnDisable()
     {
         if (objectSpawner != null) objectSpawner.objectSpawned -= OnModelSpawned;
+        if (cylinderDiameterSlider != null && _boundDiameterController != null)
+            cylinderDiameterSlider.onValueChanged.RemoveListener(_boundDiameterController.SetCylinderDiameter);
     }
 
     private async void OnModelSpawned(GameObject spawnedObject)
@@ -46,6 +51,16 @@ public class TEMSpawnManager : MonoBehaviour
         {
             if (_currentModel.TryGetComponent<TEMARPlacementController>(out var controller))
             {
+                if (cylinderDiameterSlider != null)
+                {
+                    if (_boundDiameterController != null)
+                        cylinderDiameterSlider.onValueChanged.RemoveListener(_boundDiameterController.SetCylinderDiameter);
+
+                    cylinderDiameterSlider.SetValueWithoutNotify(controller.CylinderDiameter);
+                    cylinderDiameterSlider.onValueChanged.AddListener(controller.SetCylinderDiameter);
+                    _boundDiameterController = controller;
+                }
+
                 List<TEMStationData> rawStations = await _TEMCsvLoader.LoadCsvAsync(csvFileName);
                 
                 // 1. Get complete map layout (Bounds, Dimensions, and Offsets)
