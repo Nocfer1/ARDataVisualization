@@ -282,7 +282,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::TEMARPlacementController
   unlitMapMaterial: {fileID: 2100000, guid: a19ea7b0368a4ae4db726aa8dab84cbc, type: 2}
   baseMaterial: {fileID: 2100000, guid: 86f5a5a30738593448da52ad9f25df1b, type: 2}
-  cylinderDiameter: 0.14
+  cylinderDiameter: 0.02
   verticalScale: 0.003
   minResistivity: 1
   maxResistivity: 1000
