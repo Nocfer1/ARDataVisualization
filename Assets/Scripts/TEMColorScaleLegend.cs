@@ -1,318 +1,166 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>Transparent, logarithmic resistivity color scale for the AR view.</summary>
+/// <summary>Transparent, logarithmic resistivity color scale supporting portrait and landscape layouts.</summary>
 public class TEMColorScaleLegend : MonoBehaviour
 {
+    [Header("Portrait References")]
+    [SerializeField] private GameObject portraitRoot;
+    [SerializeField] private Image portraitGradientImage;
+    [SerializeField] private RectTransform portraitTicksContainer;
+
+    [Header("Landscape References")]
+    [SerializeField] private GameObject landscapeRoot;
+    [SerializeField] private Image landscapeGradientImage;
+    [SerializeField] private RectTransform landscapeTicksContainer;
+
+    [Header("Shared Setup")]
+    [SerializeField] private GameObject tickTemplatePrefab;
     [SerializeField] private float minResistivity = 1f;
     [SerializeField] private float maxResistivity = 1000f;
 
-    private RectTransform _panel;
-    private RectTransform _bar;
-    private RectTransform _ticksRoot;
-    private bool _gradientLandscape;
-    private List<Tick> _ticks;
-    private int _lastWidth;
-    private int _lastHeight;
-    private float _lastScaleFactor;
+    private bool _isLandscape;
+    private Texture2D _portraitGradientTexture;
+    private Texture2D _landscapeGradientTexture;
 
-    private struct Tick
+    private void Start()
     {
-        public float position;
-        public string label;
+        _isLandscape = Screen.width > Screen.height;
 
-        public Tick(float position, string label)
-        {
-            this.position = position;
-            this.label = label;
-        }
-    }
-
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void AddToSceneCanvas()
-    {
-        Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsSortMode.None);
-        Canvas fallback = null;
-        foreach (Canvas canvas in canvases)
-        {
-            if (canvas.renderMode != RenderMode.ScreenSpaceOverlay) continue;
-            if (canvas.name == "UI")
-            {
-                Attach(canvas);
-                return;
-            }
-            if (fallback == null) fallback = canvas;
-        }
-        if (fallback != null) Attach(fallback);
-    }
-
-    private static void Attach(Canvas canvas)
-    {
-        if (canvas.GetComponent<TEMColorScaleLegend>() == null)
-            canvas.gameObject.AddComponent<TEMColorScaleLegend>();
-    }
-
-    private void Awake()
-    {
-        CanvasScaler scaler = GetComponent<CanvasScaler>();
-        if (scaler != null)
-        {
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1080f, 1920f);
-            scaler.matchWidthOrHeight = 0.5f;
-        }
-
-        EnsureUI();
-        _panel = transform.Find("ColorScalePanel") as RectTransform;
-        _bar = _panel != null ? _panel.Find("Gradient") as RectTransform : null;
-        _ticksRoot = _panel != null ? _panel.Find("Ticks") as RectTransform : null;
-        _ticks = BuildLogTicks();
-        _gradientLandscape = Screen.width > Screen.height;
-        BuildGradient(_gradientLandscape);
-        BuildTicks();
-        RefreshLayout();
-    }
-
-    private void EnsureUI()
-    {
-        // The layout container has no Image: only the gradient, tick marks and numbers render.
-        RectTransform panel = transform.Find("ColorScalePanel") as RectTransform;
-        if (panel == null)
-            panel = CreateRect("ColorScalePanel", transform);
-
-        Image oldBackground = panel.GetComponent<Image>();
-        if (oldBackground != null) Destroy(oldBackground);
-        if (panel.Find("Gradient") == null) CreateRect("Gradient", panel);
-        if (panel.Find("Ticks") == null) CreateRect("Ticks", panel);
-        for (int i = panel.childCount - 1; i >= 0; i--)
-        {
-            Transform child = panel.GetChild(i);
-            if (child.name != "Gradient" && child.name != "Ticks")
-                Destroy(child.gameObject);
-        }
-
-        Transform oldButton = transform.Find("OrientationSimulatorButton");
-        if (oldButton != null) Destroy(oldButton.gameObject);
-    }
-
-    private static RectTransform CreateRect(string objectName, Transform parent)
-    {
-        GameObject child = new GameObject(objectName, typeof(RectTransform));
-        child.transform.SetParent(parent, false);
-        return child.GetComponent<RectTransform>();
+        ApplyOrientationState(_isLandscape);
+        BuildGradients();
+        BuildAllTicks();
     }
 
     private void Update()
     {
-        CanvasScaler scaler = GetComponent<CanvasScaler>();
-        float scaleFactor = scaler != null ? scaler.scaleFactor : 1f;
-        if (Screen.width != _lastWidth || Screen.height != _lastHeight ||
-            !Mathf.Approximately(scaleFactor, _lastScaleFactor))
-            RefreshLayout();
-    }
-
-    private void RefreshLayout()
-    {
-        if (_panel == null) return;
-
-        _lastWidth = Screen.width;
-        _lastHeight = Screen.height;
-        CanvasScaler scaler = GetComponent<CanvasScaler>();
-        float uiScale = scaler != null ? Mathf.Max(0.01f, scaler.scaleFactor) : 1f;
-        _lastScaleFactor = uiScale;
-        float unit = 1f / uiScale;
-        bool portrait = Screen.height >= Screen.width;
-        float screenWidth = Screen.width / uiScale;
-        float screenHeight = Screen.height / uiScale;
-        bool landscape = !portrait;
-
-        // The bar's local vertical axis is rotated in landscape. Reverse segment
-        // placement there so the visible scale remains low-to-high from left to right.
-        if (_gradientLandscape != landscape)
-        {
-            _gradientLandscape = landscape;
-            BuildGradient(_gradientLandscape);
-        }
-
-        _panel.anchorMin = new Vector2(1f, 0.5f);
-        _panel.anchorMax = new Vector2(1f, 0.5f);
-        _panel.pivot = new Vector2(1f, 0.5f);
-        _panel.anchoredPosition = new Vector2(-6f * unit, 0f);
-        _panel.sizeDelta = portrait
-            ? new Vector2(170f * unit, screenHeight * 0.5f)
-            : new Vector2(screenWidth * 0.5f, 150f * unit);
-
-        _bar.anchorMin = _bar.anchorMax = Vector2.zero;
-        _bar.pivot = new Vector2(0.5f, 0.5f);
-        _ticksRoot.anchorMin = _ticksRoot.anchorMax = Vector2.zero;
-        _ticksRoot.pivot = Vector2.zero;
-        _ticksRoot.anchoredPosition = Vector2.zero;
-        // CreateRectTransform defaults to 100x100. Keep this origin container at
-        // zero size so child tick coordinates share the panel's bottom-left origin.
-        _ticksRoot.sizeDelta = Vector2.zero;
-
-        float barThickness = 22f * unit;
-        if (portrait)
-        {
-            float barHeight = _panel.sizeDelta.y - 24f * unit;
-            float barX = _panel.sizeDelta.x - 12f * unit - barThickness * 0.5f;
-            float barY = _panel.sizeDelta.y * 0.5f;
-            _bar.anchoredPosition = new Vector2(barX, barY);
-            _bar.sizeDelta = new Vector2(barThickness, barHeight);
-            _bar.localRotation = Quaternion.identity;
-            LayoutVerticalTicks(unit, barX - barThickness * 0.5f, 12f * unit, barHeight);
-        }
-        else
-        {
-            float barWidth = _panel.sizeDelta.x - 24f * unit;
-            float barX = _panel.sizeDelta.x * 0.5f;
-            float barY = 125f * unit;
-            _bar.anchoredPosition = new Vector2(barX, barY);
-            // The gradient is built bottom-to-top; rotate it so low-to-high reads left-to-right.
-            _bar.sizeDelta = new Vector2(barThickness, barWidth);
-            _bar.localRotation = Quaternion.Euler(0f, 0f, -90f);
-            LayoutHorizontalTicks(unit, barX - barWidth * 0.5f, barY - barThickness * 0.5f, barWidth);
+        bool currentLandscape = Screen.width > Screen.height;
+        if (currentLandscape != _isLandscape)
+        { 
+            _isLandscape = currentLandscape;
+            ApplyOrientationState(_isLandscape);
+            BuildAllTicks();
         }
     }
 
-    private void LayoutVerticalTicks(float unit, float tickX, float barBottom, float barHeight)
+    private void ApplyOrientationState(bool landscape)
     {
-        for (int i = 0; i < _ticksRoot.childCount; i++)
-        {
-            RectTransform tickRoot = _ticksRoot.GetChild(i) as RectTransform;
-            RectTransform mark = tickRoot.GetChild(0) as RectTransform;
-            RectTransform labelRect = tickRoot.GetChild(1) as RectTransform;
-            Text label = labelRect.GetComponent<Text>();
-            Tick tick = _ticks[i];
-            float markLength = (tick.label.Length > 0 ? 12f : 7f) * unit;
-
-            tickRoot.anchoredPosition = new Vector2(tickX, barBottom + tick.position * barHeight);
-            mark.anchoredPosition = Vector2.zero;
-            mark.sizeDelta = new Vector2(markLength, 2f * unit);
-            bool rotateLabel = Screen.width > Screen.height;
-            if (rotateLabel)
-            {
-                labelRect.pivot = new Vector2(0.5f, 0.5f);
-                labelRect.anchoredPosition = new Vector2(-(markLength + 2f * unit + 26f * unit), 0f);
-                labelRect.sizeDelta = new Vector2(96f * unit, 32f * unit);
-                labelRect.localRotation = Quaternion.Euler(0f, 0f, -90f);
-                label.alignment = TextAnchor.MiddleCenter;
-            }
-            else
-            {
-                mark.pivot = new Vector2(1f, 0.5f);
-                labelRect.pivot = new Vector2(1f, 0.5f);
-                labelRect.anchoredPosition = new Vector2(-markLength, 0f);
-                labelRect.sizeDelta = new Vector2(76f * unit, 32f * unit);
-                labelRect.localRotation = Quaternion.identity;
-                label.alignment = TextAnchor.MiddleRight;
-            }
-            label.fontSize = Mathf.RoundToInt(24f * unit);
-        }
+        if (portraitRoot != null) portraitRoot.SetActive(!landscape);
+        if (landscapeRoot != null) landscapeRoot.SetActive(landscape);
     }
 
-    private void LayoutHorizontalTicks(float unit, float barLeft, float barY, float barWidth)
+    private void BuildGradients()
     {
-        for (int i = 0; i < _ticksRoot.childCount; i++)
-        {
-            RectTransform tickRoot = _ticksRoot.GetChild(i) as RectTransform;
-            RectTransform mark = tickRoot.GetChild(0) as RectTransform;
-            RectTransform labelRect = tickRoot.GetChild(1) as RectTransform;
-            Text label = labelRect.GetComponent<Text>();
-            Tick tick = _ticks[i];
-            float markLength = (tick.label.Length > 0 ? 18f : 10f) * unit;
+        if (portraitGradientImage != null)
+            _portraitGradientTexture = CreateGradientTexture(portraitGradientImage.rectTransform, false);
 
-            float horizontalPosition = 1f - tick.position;
-            tickRoot.anchoredPosition = new Vector2(barLeft + horizontalPosition * barWidth, barY);
-            mark.pivot = new Vector2(0.5f, 1f);
-            mark.anchoredPosition = Vector2.zero;
-            mark.sizeDelta = new Vector2(2f * unit, markLength);
-            labelRect.pivot = new Vector2(0.5f, 0.5f);
-            labelRect.anchoredPosition = new Vector2(0f, -(markLength + 22f * unit + 1f * unit));
-            labelRect.sizeDelta = new Vector2(84f * unit, 30f * unit);
-            labelRect.localRotation = Quaternion.Euler(0f, 0f, -90f);
-            label.alignment = TextAnchor.MiddleCenter;
-            label.fontSize = Mathf.RoundToInt(24f * unit);
-        }
+        if (landscapeGradientImage != null)
+            _landscapeGradientTexture = CreateGradientTexture(landscapeGradientImage.rectTransform, true);
     }
 
-    private List<Tick> BuildLogTicks()
+    private Texture2D CreateGradientTexture(RectTransform rectTransform, bool isLandscape)
     {
-        var ticks = new List<Tick>();
-        float min = Mathf.Max(minResistivity, 0.0001f);
-        float max = Mathf.Max(maxResistivity, min * 10f);
-        float logMin = Mathf.Log10(min);
-        float logMax = Mathf.Log10(max);
-        int startDecade = Mathf.FloorToInt(logMin);
-        int endDecade = Mathf.CeilToInt(logMax);
+        int resolution = rectTransform != null 
+            ? Mathf.RoundToInt(isLandscape ? rectTransform.rect.width : rectTransform.rect.height) 
+            : 256;
+        resolution = Mathf.Clamp(resolution, 64, 512);
 
-        for (int decade = startDecade; decade <= endDecade; decade++)
+        int texWidth = isLandscape ? resolution : 1;
+        int texHeight = isLandscape ? 1 : resolution;
+
+        Texture2D tex = new Texture2D(texWidth, texHeight, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Color[] colors = new Color[resolution];
+        for (int i = 0; i < resolution; i++)
+        {
+            float t = i / (float)(resolution - 1);
+            colors[i] = JetPalette.Evaluate(t);
+        }
+
+        tex.SetPixels(colors);
+        tex.Apply();
+
+        Image targetImage = isLandscape ? landscapeGradientImage : portraitGradientImage;
+        if (targetImage != null)
+        {
+            targetImage.sprite = Sprite.Create(tex, new Rect(0, 0, texWidth, texHeight), new Vector2(0.5f, 0.5f));
+        }
+
+        return tex;
+    }
+
+    private void BuildAllTicks()
+    {
+        Canvas.ForceUpdateCanvases();
+
+        BuildTicksForContainer(portraitTicksContainer, portraitGradientImage?.rectTransform, false);
+        BuildTicksForContainer(landscapeTicksContainer, landscapeGradientImage?.rectTransform, true);
+    }
+
+    private void BuildTicksForContainer(RectTransform container, RectTransform gradientRect, bool isLandscape)
+    {
+        if (container == null || gradientRect == null || tickTemplatePrefab == null) return;
+
+        container.anchorMin = gradientRect.anchorMin;
+        container.anchorMax = gradientRect.anchorMax;
+        container.anchoredPosition = gradientRect.anchoredPosition;
+        container.sizeDelta = gradientRect.sizeDelta;
+        container.pivot = gradientRect.pivot;
+
+        foreach (Transform child in container)
+        {
+            Destroy(child.gameObject);
+        }
+
+        float logMin = Mathf.Log10(Mathf.Max(minResistivity, 0.0001f));
+        float logMax = Mathf.Log10(Mathf.Max(maxResistivity, minResistivity * 10f));
+
+        for (int decade = Mathf.FloorToInt(logMin); decade <= Mathf.CeilToInt(logMax); decade++)
         {
             float decadeBase = Mathf.Pow(10f, decade);
             for (int factor = 1; factor <= 9; factor++)
             {
                 float value = factor * decadeBase;
-                if (value < min || value > max) continue;
+                if (value < minResistivity || value > maxResistivity) continue;
 
-                float position = Mathf.InverseLerp(logMin, logMax, Mathf.Log10(value));
-                string label = factor == 1 || factor == 3 ? FormatValue(value) : string.Empty;
-                ticks.Add(new Tick(position, label));
+                float normalizedPos = Mathf.InverseLerp(logMin, logMax, Mathf.Log10(value));
+
+                GameObject tickObj = Instantiate(tickTemplatePrefab, container);
+                RectTransform rt = tickObj.GetComponent<RectTransform>();
+
+                if (isLandscape)
+                {
+                    rt.anchorMin = new Vector2(normalizedPos, 0f);
+                    rt.anchorMax = new Vector2(normalizedPos, 1f);
+                }
+                else
+                {
+                    rt.anchorMin = new Vector2(0f, normalizedPos);
+                    rt.anchorMax = new Vector2(1f, normalizedPos);
+                }
+
+                rt.anchoredPosition = Vector2.zero;
+                rt.sizeDelta = Vector2.zero;
+                
+                // Apply 90-degree rotation to the whole tick object in landscape mode
+                rt.localRotation = isLandscape ? Quaternion.Euler(0f, 0f, 90f) : Quaternion.identity;
+
+                bool hasLabel = (factor == 1 || factor == 3);
+                string labelText = hasLabel ? (value >= 100f ? value.ToString("0") : value.ToString("0.#")) : string.Empty;
+
+                TEMScaleTick tickScript = tickObj.GetComponent<TEMScaleTick>();
+                if (tickScript != null)
+                {
+                    tickScript.Initialize(labelText, isLandscape);
+                }
             }
         }
-
-        return ticks;
     }
 
-    private void BuildGradient(bool landscape)
+    private void OnDestroy()
     {
-        if (_bar == null) return;
-        for (int i = _bar.childCount - 1; i >= 0; i--)
-            Destroy(_bar.GetChild(i).gameObject);
-        const int segments = 256;
-        for (int i = 0; i < segments; i++)
-        {
-            GameObject segment = new GameObject("Color_" + i, typeof(RectTransform), typeof(Image));
-            RectTransform rect = segment.GetComponent<RectTransform>();
-            rect.SetParent(_bar, false);
-            int segmentPosition = landscape ? segments - 1 - i : i;
-            rect.anchorMin = new Vector2(0f, segmentPosition / (float)segments);
-            rect.anchorMax = new Vector2(1f, (segmentPosition + 1f) / segments);
-            rect.offsetMin = rect.offsetMax = Vector2.zero;
-            Image image = segment.GetComponent<Image>();
-            image.color = JetPalette.Evaluate(i / (float)(segments - 1));
-            image.raycastTarget = false;
-        }
-    }
-
-    private void BuildTicks()
-    {
-        if (_ticksRoot == null) return;
-        for (int i = _ticksRoot.childCount - 1; i >= 0; i--)
-            Destroy(_ticksRoot.GetChild(i).gameObject);
-        for (int i = 0; i < _ticks.Count; i++)
-        {
-            RectTransform tickRoot = CreateRect("Tick_" + i, _ticksRoot);
-            RectTransform mark = CreateRect("Mark", tickRoot);
-            mark.gameObject.AddComponent<Image>().raycastTarget = false;
-
-            GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
-            RectTransform labelRect = labelObject.GetComponent<RectTransform>();
-            labelRect.SetParent(tickRoot, false);
-            Text label = labelObject.GetComponent<Text>();
-            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            label.fontSize = 16;
-            label.color = Color.white;
-            label.raycastTarget = false;
-            label.horizontalOverflow = HorizontalWrapMode.Overflow;
-            label.verticalOverflow = VerticalWrapMode.Overflow;
-            label.text = _ticks[i].label;
-            label.enabled = _ticks[i].label.Length > 0;
-        }
-    }
-
-    private static string FormatValue(float value)
-    {
-        return value >= 100f ? value.ToString("0") : value.ToString("0.#");
+        if (_portraitGradientTexture != null) Destroy(_portraitGradientTexture);
+        if (_landscapeGradientTexture != null) Destroy(_landscapeGradientTexture);
     }
 }
