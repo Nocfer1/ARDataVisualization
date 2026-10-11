@@ -22,7 +22,9 @@ public class TEMARPlacementController : MonoBehaviour
     private Mesh _primitiveCylinderMesh;
     private bool _modelReady;
     private float _modelBaseY;
-    private float _builtCylinderDiameter;
+    private float _baseCylinderDiameter;
+    private Vector3 _baseColliderCenter;
+    private Vector3 _baseColliderSize;
     
     private Texture2D _activeMapTexture; // Tracked to prevent native GPU memory leaks
 
@@ -82,7 +84,7 @@ public class TEMARPlacementController : MonoBehaviour
         }
 
         modelBounds.Expand(new Vector3(cylinderDiameter, 0f, cylinderDiameter));
-        _builtCylinderDiameter = cylinderDiameter;
+        _baseCylinderDiameter = cylinderDiameter;
 
         // Shift root up so lowest geometry point sits flush on top of the AR plane
         float lowestY = modelBounds.min.y;
@@ -99,6 +101,12 @@ public class TEMARPlacementController : MonoBehaviour
             modelBounds.size.z, 
             modelBounds.center + new Vector3(0f, heightOffset, 0f)
         );
+        BoxCollider modelCollider = GetComponent<BoxCollider>();
+        if (modelCollider != null)
+        {
+            _baseColliderCenter = modelCollider.center;
+            _baseColliderSize = modelCollider.size;
+        }
 
         status = $"TEM model ready ({stations.Count} stations built).";
         _modelReady = true;
@@ -108,9 +116,11 @@ public class TEMARPlacementController : MonoBehaviour
     public void SetCylinderDiameter(float diameter)
     {
         cylinderDiameter = Mathf.Max(0.001f, diameter);
-        if (!_modelReady || _modelRoot == null || _builtCylinderDiameter <= 0f) return;
+        if (!_modelReady || _modelRoot == null || _baseCylinderDiameter <= 0f) return;
 
-        float scale = cylinderDiameter / _builtCylinderDiameter;
+        // The cylinder meshes were baked using _baseCylinderDiameter. Always scale
+        // against that original diameter so the result does not depend on slider history.
+        float scale = cylinderDiameter / _baseCylinderDiameter;
         foreach (Transform station in _modelRoot)
         {
             if (!station.name.StartsWith("Station_")) continue;
@@ -120,16 +130,14 @@ public class TEMARPlacementController : MonoBehaviour
         BoxCollider modelCollider = GetComponent<BoxCollider>();
         if (modelCollider != null)
         {
-            Vector3 center = modelCollider.center;
-            center.x *= scale;
-            center.z *= scale;
-            modelCollider.center = center;
+            // Station positions stay fixed; only the end cylinders' footprint changes.
+            float diameterDelta = 2f * (cylinderDiameter - _baseCylinderDiameter);
+            modelCollider.center = _baseColliderCenter;
             modelCollider.size = new Vector3(
-                modelCollider.size.x * scale,
-                modelCollider.size.y,
-                modelCollider.size.z * scale);
+                Mathf.Max(0.001f, _baseColliderSize.x + diameterDelta),
+                _baseColliderSize.y,
+                Mathf.Max(0.001f, _baseColliderSize.z + diameterDelta));
         }
-        _builtCylinderDiameter = cylinderDiameter;
     }
 
     public float CylinderDiameter => cylinderDiameter;
