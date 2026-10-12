@@ -157,6 +157,11 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.ARStarterAssets
             {
                 m_AttemptSpawn = false;
 
+                // A slider drag is a UI gesture, even if the XR UI module reports
+                // its pointer state differently from the legacy pointer ID below.
+                if (TEMSliderSpawnBlocker.IsBlockingSpawn)
+                    return;
+
                 // Cancel the spawn if the select was delayed until the frame after the spawn trigger.
                 // This can happen if the select action uses a different input source than the spawn trigger.
                 if (m_ARInteractor.hasSelection)
@@ -189,6 +194,9 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.ARStarterAssets
             }
 
             m_AttemptSpawn = false;
+            if (TEMSliderSpawnBlocker.IsBlockingSpawn)
+                return;
+
             switch (m_SpawnTriggerType)
             {
                 case SpawnTriggerType.SelectAttempt:

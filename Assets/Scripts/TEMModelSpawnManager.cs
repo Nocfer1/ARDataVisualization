@@ -5,6 +5,7 @@ using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
+using UnityEngine.XR.Interaction.Toolkit.Samples.ARStarterAssets;
 using UnityEngine.UI;
 
 public class TEMSpawnManager : MonoBehaviour
@@ -29,6 +30,9 @@ public class TEMSpawnManager : MonoBehaviour
     
     private void OnEnable()
     {
+        if (cylinderDiameterSlider != null && cylinderDiameterSlider.GetComponent<TEMSliderSpawnBlocker>() == null)
+            cylinderDiameterSlider.gameObject.AddComponent<TEMSliderSpawnBlocker>();
+
         if (objectSpawner != null) objectSpawner.objectSpawned += OnModelSpawned;
     }
 
